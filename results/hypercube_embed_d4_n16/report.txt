@@ -1,0 +1,4 @@
+Instance: hypercube_embed_d4_n16
+Nodes:    16   Root: 1
+Iters:    592   Alpha: 0.2   Reactive: False
+Best makespan:  48.284271   Time(s): 0.334

@@ -1,0 +1,4 @@
+Instance: star_n16
+Nodes:    16   Root: 1
+Iters:    401   Alpha: 0.2   Reactive: False
+Best makespan:  371.558631   Time(s): 0.224

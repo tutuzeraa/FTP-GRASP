@@ -1,0 +1,4 @@
+Instance: debruijn_embed_k8_m2_n256
+Nodes:    256   Root: 1
+Iters:    1   Alpha: 0.2   Reactive: False
+Best makespan:  284.621814   Time(s): 2.308

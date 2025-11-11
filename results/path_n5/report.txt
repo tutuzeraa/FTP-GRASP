@@ -1,0 +1,4 @@
+Instance: path_n5
+Nodes:    5   Root: 5
+Iters:    401   Alpha: 0.2   Reactive: False
+Best makespan:  40.000000   Time(s): 0.009

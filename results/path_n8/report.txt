@@ -1,0 +1,4 @@
+Instance: path_n8
+Nodes:    8   Root: 1
+Iters:    401   Alpha: 0.2   Reactive: False
+Best makespan:  70.000000   Time(s): 0.031

@@ -1,0 +1,20 @@
+NAME: star_n16
+TYPE: TREE
+ROOT: 1
+PARENT_SECTION (1-based: node parent)
+1 0
+2 6
+3 6
+4 5
+5 7
+6 7
+7 8
+8 1
+9 8
+10 9
+11 9
+12 11
+13 10
+14 10
+15 11
+16 5

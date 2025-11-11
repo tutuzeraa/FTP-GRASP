@@ -1,0 +1,4 @@
+Instance: path_n16
+Nodes:    16   Root: 1
+Iters:    401   Alpha: 0.2   Reactive: False
+Best makespan:  150.000000   Time(s): 0.216

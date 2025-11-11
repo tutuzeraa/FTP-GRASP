@@ -1,0 +1,4 @@
+Instance: ch150
+Nodes:    150   Root: 1
+Iters:    3   Alpha: 0.2   Reactive: False
+Best makespan:  832.602822   Time(s): 1.386

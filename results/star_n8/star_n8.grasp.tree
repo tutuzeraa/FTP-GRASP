@@ -1,0 +1,12 @@
+NAME: star_n8
+TYPE: TREE
+ROOT: 1
+PARENT_SECTION (1-based: node parent)
+1 0
+2 3
+3 1
+4 3
+5 4
+6 4
+7 2
+8 2

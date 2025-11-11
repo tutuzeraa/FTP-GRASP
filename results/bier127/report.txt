@@ -1,0 +1,4 @@
+Instance: bier127
+Nodes:    127   Root: 1
+Iters:    4   Alpha: 0.2   Reactive: False
+Best makespan:  13809.233522   Time(s): 1.134

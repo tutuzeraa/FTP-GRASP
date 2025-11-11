@@ -1,0 +1,4 @@
+Instance: star_n5
+Nodes:    5   Root: 5
+Iters:    401   Alpha: 0.2   Reactive: False
+Best makespan:  341.421356   Time(s): 0.011

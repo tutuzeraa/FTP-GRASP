@@ -1,0 +1,4 @@
+Instance: star_n64
+Nodes:    64   Root: 1
+Iters:    30   Alpha: 0.2   Reactive: False
+Best makespan:  375.550785   Time(s): 1.021

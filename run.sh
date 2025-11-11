@@ -8,11 +8,11 @@
 set -euo pipefail
 
 # Diretório com as instâncias
-INST_DIR="instances"
+INST_DIR="instances_tsp"
 
 # Parâmetros do GRASP (conforme proposta)
 ROOT=1          # índice 1-based da raiz para a CLI (internamente vira 0-based)
-ALPHA=0.2       # tamanho efetivo da RCL (0 => guloso, 1 => aleatório)
+ALPHA=0.2     # tamanho efetivo da RCL (0 => guloso, 1 => aleatório)
 SEED=123        # semente para reprodutibilidade
 MAX_ITERS=3000  # limite de iterações
 MAX_TIME=1      # limite de tempo por instância (segundos)
@@ -70,7 +70,7 @@ for f in "$INST_DIR"/*; do
 
   # Execução
   echo ">>> $f  (n=$N)"
-  python3 grasp_ftp.py "$f" \
+  python3 src/grasp_ftp.py "$f" \
     --root "$ROOT" \
     --alpha "$ALPHA" --seed "$SEED" \
     --lambda-central 0.25 --k-central 15 \

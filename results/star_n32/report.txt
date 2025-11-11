@@ -1,0 +1,4 @@
+Instance: star_n32
+Nodes:    32   Root: 1
+Iters:    234   Alpha: 0.2   Reactive: False
+Best makespan:  374.342457   Time(s): 1.001

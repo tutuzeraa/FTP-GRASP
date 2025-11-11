@@ -1,0 +1,4 @@
+Instance: hypercube_embed_d6_n64
+Nodes:    64   Root: 1
+Iters:    30   Alpha: 0.2   Reactive: False
+Best makespan:  103.071358   Time(s): 1.030

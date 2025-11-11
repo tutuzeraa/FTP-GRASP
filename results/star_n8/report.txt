@@ -1,0 +1,4 @@
+Instance: star_n8
+Nodes:    8   Root: 1
+Iters:    401   Alpha: 0.2   Reactive: False
+Best makespan:  343.143044   Time(s): 0.033

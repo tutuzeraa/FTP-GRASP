@@ -1,0 +1,4 @@
+Instance: debruijn_embed_k7_m2_n128
+Nodes:    128   Root: 1
+Iters:    4   Alpha: 0.2   Reactive: False
+Best makespan:  310.344912   Time(s): 1.111

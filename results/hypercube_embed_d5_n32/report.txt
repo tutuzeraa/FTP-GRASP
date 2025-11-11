@@ -1,0 +1,4 @@
+Instance: hypercube_embed_d5_n32
+Nodes:    32   Root: 1
+Iters:    231   Alpha: 0.2   Reactive: False
+Best makespan:  80.644951   Time(s): 1.002
