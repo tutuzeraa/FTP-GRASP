@@ -318,7 +318,7 @@ class GraspConfig:
     alpha: float = 0.2
     seed: Optional[int] = None
     reactive: bool = False
-    reactive_grid: Tuple[float,...] = (0.0, 0.1, 0.2, 0.3, 0.5)
+    reactive_grid: Tuple[float,...] = (0.0, 0.05, 0.1, 0.15, 0.2, 0.3)
     reactive_tau: int = 25
 
 def greedy_randomized_construction(inst: FTPInstance, root: int, alpha: float,
@@ -405,73 +405,143 @@ def greedy_randomized_construction(inst: FTPInstance, root: int, alpha: float,
 
 
 def local_search_reparent(inst: FTPInstance, sol: FTPSolution, root:int) -> FTPSolution:
-    # Busca local por reanexação de pai (1-move), estratégia de primeira melhora:
-    #   - Tenta para cada v != root reanexar em pais que ativam não depois de t[v].
-    #   - Avalia movimento com reparent_and_eval (incremental).
-    #   - Ao aceitar, recomputa tempos globalmente (estabiliza) e recomeça varredura.
+    # Busca local por reanexação de subárvore (1-move), estratégia de primeira melhora:
+    #   - Tenta para cada v != root reanexar em pais elegíveis.
+    #   - Avalia movimento com reparent_and_eval (incremental) [O(subtree_size]).
+    #   - Ao aceitar, recomputa tempos globalmente (recompute_times) para estabilizar
+    #     o estado 'sol' e recomeça a varredura.
     n = inst.n()
-    parent = sol.parent[:]        # cópia de trabalho
-    t = sol.t[:]
-    best_T = sol.makespan
-
+    # Copiamos a solução base para esta 'passada' da busca local
+    current_sol = FTPSolution(parent=sol.parent[:], t=sol.t[:], root=sol.root, makespan=sol.makespan)
+    
     capacity = _init_capacity(n, root)
-    outdeg = _compute_outdeg(parent)
+    outdeg = _compute_outdeg(current_sol.parent)
 
     improved = True
     while improved:
         improved = False
+        
+        # O makespan a ser batido nesta iteração da busca
+        best_T = current_sol.makespan
 
         # ordem: nós mais críticos primeiro (maior tempo)
-        order = sorted(range(n), key=lambda v: t[v], reverse=True)
+        order = sorted(range(n), key=lambda v: current_sol.t[v], reverse=True)
 
         for v in order:
             if v == root:
                 continue
 
-            old_p = parent[v]
-            # subárvore de v para evitar ciclos
-            sub = set(subtree_nodes(parent, v))
-            # candidatos: ativos (t[u] < inf), com capacidade sobrando, não na subárvore de v
+            old_p = current_sol.parent[v]
+            
+            # Subárvore de v para evitar ciclos (não podemos anexar v em um de seus filhos)
+            # Nota: reparent_and_eval JÁ faz essa checagem, mas é bom filtrar
+            # os candidatos antes para economizar chamadas.
+            sub = set(subtree_nodes(current_sol.parent, v))
+            
+            # candidatos: ativos, com capacidade sobrando, não na subárvore de v
             cand_parents = [u for u in range(n)
-                            if (t[u] < float("inf")) and (outdeg[u] < capacity[u]) and (u not in sub) and (u != v)]
+                            if (current_sol.t[u] < float("inf")) and \
+                               (outdeg[u] < capacity[u]) and \
+                               (u not in sub) and \
+                               (u != v)]
             best_move = None
 
             for u in cand_parents:
                 if u == old_p:
                     continue
-                # testa movimento: parent[v] <- u
-                trial_parent = parent[:]
-                trial_parent[v] = u
-                # recomputa tempos e makespan (usa sua função existente)
-                trial_sol = recompute_times(inst, trial_parent, root)
-                trial_T = trial_sol.makespan
+                
+                # =========================================================
+                # MUDANÇA PRINCIPAL: AVALIAÇÃO INCREMENTAL
+                # =========================================================
+                # Em vez de recompute_times, usamos a avaliação incremental
+                # que só recalcula a subárvore de 'v'.
+                # O 'current_sol' (baseline) não é modificado aqui.
+                trial_T = reparent_and_eval(inst, current_sol, v, u)
                 
                 if trial_T + 1e-12 < best_T:  # aceita melhora estrita (tolerância numérica)
                     best_T = trial_T
-                    best_move = (v, old_p, u, trial_parent, trial_sol)
+                    best_move = (v, old_p, u)
                     break  # first-improvement
 
             if best_move is not None:
-                v, old_p, u, new_parent, new_t = best_move
-                # aplica movimento
-                parent = new_parent
-                t = new_t
-
-                # atualiza outdeg
-                if old_p >= 0:
-                    outdeg[old_p] -= 1
-                outdeg[u] += 1
+                v_move, old_p_move, u_move = best_move
+                
+                # =========================================================
+                # APLICA O MOVIMENTO E RE-ESTABILIZA
+                # =========================================================
+                # Agora que achamos uma melhora, aplicamos o 'parent'
+                current_sol.parent[v_move] = u_move
+                
+                # E recalculamos a árvore *uma vez* para ter os t[v] corretos
+                # para a próxima iteração do 'while improved'.
+                current_sol = recompute_times(inst, current_sol.parent, root)
+                
+                # Atualiza outdeg (necessário recalcular pois 'sol' é novo)
+                outdeg = _compute_outdeg(current_sol.parent)
 
                 improved = True
-                break  # recomeça varredura
+                break  # recomeça varredura a partir da nova solução 'current_sol'
 
-    return FTPSolution(parent=parent, t=t, root=root, makespan=best_T)
+    # Retorna a solução localmente ótima encontrada
+    return current_sol
+
+# ============================================================
+# Path Relinking
+# ============================================================
+
+def path_relinking(inst: FTPInstance, sol_start: FTPSolution, sol_guide: FTPSolution) -> FTPSolution:
+    """
+    Explora o caminho de 'sol_start' até 'sol_guide', aplicando um 1-move de 
+    cada vez. Retorna a melhor solução (menor makespan) encontrada *no caminho*.
     
+    sol_start: Solução de partida (ex: a candidata atual).
+    sol_guide: Solução guia (ex: a melhor global).
+    """
+    # A melhor solução no caminho é, no mínimo, a de partida.
+    best_on_path = sol_start
+    
+    # Começamos com uma cópia da solução inicial para modificar
+    current_parent = sol_start.parent[:]
+    
+    # 1. Encontra o "delta": conjunto de nós com pais diferentes
+    delta = set()
+    n = inst.n()
+    for v in range(n):
+        if current_parent[v] != sol_guide.parent[v]:
+            delta.add(v)
+            
+    # 2. Caminha enquanto houver diferenças
+    while delta:
+        # Pega um nó aleatório (ou o primeiro) para mover
+        # .pop() é determinístico e eficiente.
+        v_to_move = delta.pop()
+        
+        # O pai que este nó 'deveria' ter, segundo a solução guia
+        target_parent = sol_guide.parent[v_to_move]
+        
+        # Aplica o movimento
+        current_parent[v_to_move] = target_parent
+        
+        # 3. Avalia o resultado deste 1-move
+        # Usamos recompute_times para garantir um estado 100% correto
+        # (pais, tempos e makespan) para o próximo loop.
+        intermediate_sol = recompute_times(inst, current_parent, sol_start.root)
+        
+        # 4. Verifica se esta solução no meio do caminho é uma nova
+        #    melhor solução global.
+        if intermediate_sol.makespan < best_on_path.makespan - 1e-9:
+            best_on_path = intermediate_sol
+            
+    # Retorna a melhor solução encontrada durante a travessia
+    return best_on_path
+
 def grasp(inst: FTPInstance, root: int, cfg: GraspConfig, stopper: StopCriterion,
-          lambda_central: float, lambda_congest: float, k_central: int):
+          lambda_central: float, lambda_congest: float, k_central: int,
+          use_path_relinking: bool = False): # <-- NOVO ARGUMENTO
     # Loop principal do GRASP:
     #   - (Opcional) pré-computa centralidade radial.
     #   - Itera construção + busca local.
+    #   - (OpcFional) Path-Relinking entre 'cand' e 'best'.
     #   - Mantém melhor solução global.
     #   - (Opcional) atualiza probabilidades de α (GRASP reativo) por janela.
     # Retorna (melhor_solucao, numero_de_iteracoes).
@@ -509,9 +579,24 @@ def grasp(inst: FTPInstance, root: int, cfg: GraspConfig, stopper: StopCriterion
         # 2) Busca Local
         cand = local_search_reparent(inst, cand, root)
 
+        # ============================================================
+        # BLOCO NOVO: Path-Relinking (Intensificação)
+        # ============================================================
+        pr_cand = cand # A candidata padrão é o resultado da busca local
+        
+        # Se o PR estiver ativo E já tivermos uma 'best' para guiar
+        if use_path_relinking and best is not None:
+            # Tenta encontrar uma solução no caminho entre 'cand' e 'best'
+            pr_cand = path_relinking(inst, cand, best)
+        
+        # A candidata final (pr_cand) agora é o melhor resultado
+        # da (Busca Local) OU do (Path Relinking)
+        # ============================================================
+
         improved = False
-        if best is None or cand.makespan < best.makespan - 1e-9:
-            best = cand
+        # Comparamos a *melhor* candidata (pr_cand) com a global (best)
+        if best is None or pr_cand.makespan < best.makespan - 1e-9:
+            best = pr_cand # Salva a melhor candidata encontrada
             improved = True
 
         # Atualiza critérios de parada
@@ -519,7 +604,7 @@ def grasp(inst: FTPInstance, root: int, cfg: GraspConfig, stopper: StopCriterion
 
         # Atualização do reativo: melhora aumentam probabilidade dos α vencedores
         if cfg.reactive:
-            perf_window.append((alpha, cand.makespan))
+            perf_window.append((alpha, cand.makespan)) # Nota: usa o 'cand' original para o score de alpha
             if len(perf_window) >= cfg.reactive_tau:
                 sums = {a: [] for a in grid}
                 for a, ms in perf_window:
@@ -536,6 +621,76 @@ def grasp(inst: FTPInstance, root: int, cfg: GraspConfig, stopper: StopCriterion
             break
 
     return best, iteration
+    
+# def grasp(inst: FTPInstance, root: int, cfg: GraspConfig, stopper: StopCriterion,
+    #       lambda_central: float, lambda_congest: float, k_central: int):
+    # # Loop principal do GRASP:
+    # #   - (Opcional) pré-computa centralidade radial.
+    # #   - Itera construção + busca local.
+    # #   - Mantém melhor solução global.
+    # #   - (Opcional) atualiza probabilidades de α (GRASP reativo) por janela.
+    # # Retorna (melhor_solucao, numero_de_iteracoes).
+    # rng = random.Random(cfg.seed)
+
+    # centrality = radial_centrality(inst, k=k_central) if lambda_central != 0.0 else None
+
+    # best: Optional[FTPSolution] = None
+    # iteration = 0
+
+    # # Dados do reativo
+    # grid = list(cfg.reactive_grid)
+    # probs = [1 / len(grid)] * len(grid)
+    # perf_window = []  # janela de (alpha, makespan)
+
+    # stopper.start()
+    # while True:
+    #     iteration += 1
+    #     # Escolha de α: fixo ou amostrado do reativo
+    #     alpha = cfg.alpha
+    #     if cfg.reactive:
+    #         r = rng.random()
+    #         cum = 0.0
+    #         choice = 0
+    #         for i, p in enumerate(probs):
+    #             cum += p
+    #             if r <= cum:
+    #                 choice = i
+    #                 break
+    #         alpha = grid[choice]
+
+    #     # 1) Construção
+    #     cand = greedy_randomized_construction(inst, root, alpha, rng,
+    #                                           lambda_central, lambda_congest, centrality)
+    #     # 2) Busca Local
+    #     cand = local_search_reparent(inst, cand, root)
+
+    #     improved = False
+    #     if best is None or cand.makespan < best.makespan - 1e-9:
+    #         best = cand
+    #         improved = True
+
+    #     # Atualiza critérios de parada
+    #     stopper.update(iteration, best.makespan if best else float("inf"), improved)
+
+    #     # Atualização do reativo: melhora aumentam probabilidade dos α vencedores
+    #     if cfg.reactive:
+    #         perf_window.append((alpha, cand.makespan))
+    #         if len(perf_window) >= cfg.reactive_tau:
+    #             sums = {a: [] for a in grid}
+    #             for a, ms in perf_window:
+    #                 sums[a].append(ms)
+    #             avgs = [(sum(sums[a]) / len(sums[a])) if sums[a] else float("inf") for a in grid]
+    #             mx = max(avgs)
+    #             # transforma custo em score (inversão simples) e normaliza
+    #             scores = [(mx - v + 1e-9) for v in avgs]
+    #             total = sum(scores)
+    #             probs = [s / total for s in scores]
+    #             perf_window.clear()
+
+    #     if stopper.should_stop():
+    #         break
+
+    # return best, iteration
 
 # ============================================================
 # CLI e integração com critérios de parada
@@ -568,6 +723,7 @@ def main():
     p.add_argument("--alpha", type=float, default=0.2)
     p.add_argument("--seed", type=int, default=None)
     p.add_argument("--reactive", action="store_true", default=False)
+    p.add_argument("--path-relinking", action="store_true", default=False, help="Ativa path-relinking")
     # sinais
     p.add_argument("--lambda-central", type=float, default=0.0, help="peso da centralidade (maior => favorece centrais)")
     p.add_argument("--k-central", type=int, default=10, help="#vizinhos para centralidade radial")
@@ -580,6 +736,7 @@ def main():
     p.add_argument("--outdir", type=Path, default=Path("results"))
     p.add_argument("--save-tree", action="store_true")
     p.add_argument("--save-csv", action="store_true")
+    p.add_argument("--suffix", type=str, default="", help="Sufixo para os experimentos (ex: _exp1)")
 
     args = p.parse_args()
     fmt = args.format
@@ -597,8 +754,9 @@ def main():
     best, iters = grasp(inst, root, cfg, stopper,
                         lambda_central=args.lambda_central,
                         lambda_congest=args.lambda_congest,
-                        k_central=args.k_central)
-    elapsed = time.time() - t0
+                        k_central=args.k_central,
+                        use_path_relinking=args.path_relinking) # <-- PASSA O NOVO FLAG
+    elapsed = time.time() - t0 
 
     out_path = args.outdir / inst.name
     out_path.mkdir(parents=True, exist_ok=True)
@@ -606,7 +764,15 @@ def main():
     report_lines = [
         f"Instance: {inst.name}",
         f"Nodes:    {inst.n()}   Root: {args.root}",
-        f"Iters:    {iters}   Alpha: {cfg.alpha}   Reactive: {cfg.reactive}",
+        f"Suffix:   {args.suffix}",
+        f"--- Config ---",
+        f"Alpha: {cfg.alpha}   Reactive: {cfg.reactive}   Path-relinking: {args.path_relinking}",
+        f"Lambda Central: {args.lambda_central} (k={args.k_central})",
+        f"Lambda Congest: {args.lambda_congest}",
+        f"Seed: {cfg.seed}",
+        f"Stop: max_iters={args.max_iters}, max_time={args.max_time}, max_no_improv={args.max_no_improv}",
+        f"--- Results ---",
+        f"Iters:    {iters}",
         f"Best makespan:  {best.makespan:.6f}   Time(s): {elapsed:.3f}",
     ]
 
@@ -614,11 +780,13 @@ def main():
     for line in report_lines:
         print(line)
 
-    with open(out_path / "report.txt", "w", encoding="utf-8") as r:
+    # Use o sufixo no nome do 'report.txt'
+    with open(out_path / f"report{args.suffix}.txt", "w", encoding="utf-8") as r:
         r.write("\n".join(report_lines) + "\n")
 
     if args.save_tree:
-        tree_path = out_path / f"{inst.name}.grasp.tree"
+        # Use o sufixo no nome do '.tree'
+        tree_path = out_path / f"{inst.name}{args.suffix}.grasp.tree"
         with open(tree_path, "w", encoding="utf-8") as w:
             w.write(f"NAME: {inst.name}\nTYPE: TREE\nROOT: {args.root}\n")
             w.write("PARENT_SECTION (1-based: node parent)\n")
@@ -628,7 +796,8 @@ def main():
         print(f"Saved tree: {tree_path}")
 
     if args.save_csv:
-        csv_path = out_path / f"{inst.name}.grasp.csv"
+        # Use o sufixo no nome do '.csv'
+        csv_path = out_path / f"{inst.name}{args.suffix}.grasp.csv"
         with open(csv_path, "w", newline="", encoding="utf-8") as w:
             cw = csv.writer(w)
             cw.writerow(["node", "parent", "time"])

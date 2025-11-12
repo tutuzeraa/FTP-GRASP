@@ -8,14 +8,14 @@
 set -euo pipefail
 
 # Diretório com as instâncias
-INST_DIR="instances_tsp"
+INST_DIR="instances_teste"
 
 # Parâmetros do GRASP (conforme proposta)
 ROOT=1          # índice 1-based da raiz para a CLI (internamente vira 0-based)
 ALPHA=0.2     # tamanho efetivo da RCL (0 => guloso, 1 => aleatório)
 SEED=123        # semente para reprodutibilidade
 MAX_ITERS=3000  # limite de iterações
-MAX_TIME=1      # limite de tempo por instância (segundos)
+MAX_TIME=100      # limite de tempo por instância (segundos)
 NO_IMPROV=400   # limite de iterações sem melhoria
 MAX_N=500       # LIMITE: ignora instâncias com mais de 500 vértices
 
