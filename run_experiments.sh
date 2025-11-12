@@ -5,13 +5,12 @@
 set -euo pipefail
 
 # --- Configuração Base ---
-INSTANCE_FILE="instances_teste/lin318.tsp" # A instância que vamos testar
+INSTANCE_FILE="instances_teste/literatura/d198.tsp" # A instância que vamos testar
 ROOT=1
 SEED=123
 MAX_ITERS=3000
-MAX_TIME=30
+MAX_TIME=10
 NO_IMPROV=400
-K_CENTRAL=15
 
 # --- Configuração dos Relatórios ---
 
@@ -42,10 +41,10 @@ run_exp() {
     python3 src/grasp_ftp.py "$INSTANCE_FILE" \
         --root "$ROOT" --seed "$SEED" \
         --alpha "$alpha" \
-        --lambda-central "$lambda_c" --k-central "$K_CENTRAL" \
+        --lambda-central "$lambda_c" \
         --lambda-congest "$lambda_k" \
         --max-iters "$MAX_ITERS" --max-time "$MAX_TIME" --max-no-improv "$NO_IMPROV" \
-        --save-tree --save-csv \
+        --save-csv \
         --suffix "$suffix" \
         "${extra_args[@]}"
 
@@ -62,6 +61,20 @@ run_exp() {
 }
 
 # --- Lista de Experimentos ---
+
+# Experimento 5: alpha = 0 (guloso), sem heurísticas de score
+run_exp 0.0 0.0 0 "_base_a0.0_use2opt" --use-2opt
+
+# Experimento 6
+run_exp 0.0 0.0 0.05 "_base_a0.05_use2opt" --use-2opt
+# Experimento 7: 
+run_exp 0.0 0.0 0.1 "_base_a0.1_use2opt" --use-2opt
+
+# Experimento 8: 
+run_exp 0.0 0.0 0.15 "_base_a0.15_use2opt" --use-2opt
+
+# Experimento 9: alpha = 1 (totalmente aleatório), sem heurísticas de score
+run_exp 0.0 0.0 1.0 "_base_a1.0_use2opt" --use-2opt
 
 # Experimento 5: alpha = 0 (guloso), sem heurísticas de score
 run_exp 0.0 0.0 0 "_base_a0.0" 
@@ -95,6 +108,12 @@ run_exp 0.2 0.0 0.1 "_centr_0.2"
 
 # Experimento 2: Apenas Centralidade
 run_exp 0.3 0.0 0.1 "_centr_0.3"
+
+# Experimento 2: Apenas Centralidade
+run_exp 0.5 0.0 0.1 "_centr_0.5"
+
+# Experimento 2: Apenas Centralidade
+run_exp 1.0 0.0 0.1 "_centr_0.5"
 
 # Experimento 4: Centralidade e congestionamento original
 run_exp 0.1 0.1 0.1 "_centr_cong_0.1"

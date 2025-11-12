@@ -1,19 +1,17 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 # ============================================================================
-# GRASP para o Freeze-Tag Problem (FTP) — implementação comentada
+# GRASP para o Freeze-Tag Problem (FTP)
 # ============================================================================
-# Este arquivo implementa um GRASP multi-start alinhado à proposta em LaTeX:
-# - Pré-processamento leve com distância euclidiana (EUC_2D) e um sinal de
-#   centralidade radial (k-vizinhos mais próximos).
+#  Implementacão de um GRASP multi-start para o Freeze-Tag Problem (FTP)
+# - Pré-processamento com distância euclidiana (EUC_2D) e um sinal de
+#   centralidade de proximidade.
 # - Construção gulosa-aleatorizada com RCL controlada por α, combinando:
 #     score = tempo de ativação + λ_congest * congestionamento - λ_central * centralidade
 # - Busca local por reanexação de pai (1-move), com recomputação incremental
 #   dos tempos e prevenção de ciclos (evita anexar ancestral em descendente).
+# - Busca local 2-opt leve para cadeias P->V->F (opcional).
 # - GRASP reativo (opcional), atualizando a distribuição sobre α.
+# - Path-Relinking (opcional) entre a solução candidata e a melhor global.
 # - Critérios de parada combináveis: iterações, tempo, e janela sem melhoria.
-#
-# Observação: evitamos variáveis não utilizadas; o código está limpo e coerente.
 # ============================================================================
 
 import argparse
@@ -38,7 +36,6 @@ class FTPInstance:
     coords: List[Tuple[float, float]]
 
     def n(self) -> int:
-        # Retorna o número de vértices.
         return len(self.coords)
 
     def dist(self, i: int, j: int) -> float:
@@ -108,7 +105,6 @@ def parse_xy_csv(path: str) -> FTPInstance:
 # ============================================================
 
 class StopCriterion:
-    # Interface base: permite combinar múltiplos critérios.
     def start(self):
         pass
     def update(self, iteration: int, best_cost: float, improved: bool):
@@ -117,7 +113,6 @@ class StopCriterion:
         return False
 
 class MaxIterations(StopCriterion):
-    # Para quando atinge um número máximo de iterações do GRASP.
     def __init__(self, max_iters: int):
         self.max_iters = max_iters
         self.iteration = 0
@@ -127,7 +122,6 @@ class MaxIterations(StopCriterion):
         return self.iteration >= self.max_iters
 
 class MaxTime(StopCriterion):
-    # Para por tempo total de execução (em segundos).
     def __init__(self, max_seconds: float):
         self.max_seconds = max_seconds
         self.t0 = None
@@ -137,7 +131,6 @@ class MaxTime(StopCriterion):
         return self.t0 is not None and (time.time() - self.t0) >= self.max_seconds
 
 class NoImprovementIterations(StopCriterion):
-    # Para quando há janelas longas sem melhoria do melhor custo.
     def __init__(self, max_no_improv: int):
         self.max_no_improv = max_no_improv
         self.count = 0
@@ -147,7 +140,6 @@ class NoImprovementIterations(StopCriterion):
         return self.count >= self.max_no_improv
 
 class CompositeStop(StopCriterion):
-    # Combina múltiplos critérios com OU lógico: para quando qualquer um ativa.
     def __init__(self, criteria: Iterable[StopCriterion]):
         self.criteria = list(criteria)
     def start(self):
@@ -188,7 +180,6 @@ def topo_order(parent: Sequence[int], root: int) -> List[int]:
     while stack:
         u = stack.pop()
         order.append(u)
-        # empilha filhos de u; ordem não importa para a correção
         stack.extend(children[u])
     return order
 
@@ -275,22 +266,51 @@ def _compute_outdeg(parent: list[int]) -> list[int]:
 # Sinais auxiliares: centralidade e congestionamento
 # ============================================================
 
-def radial_centrality(inst: FTPInstance, k: int = 10) -> List[float]:
-    # Centralidade radial barata: média das distâncias aos k vizinhos mais próximos.
-    # - Valores menores => posição mais central.
-    # - Normalizamos em [0,1] e invertimos para "maior é melhor".
+def closeness_centrality(inst: FTPInstance) -> dict[int, float]:
+    """
+    Calcula a centralidade de 'closeness' para todos os nós.
+    Um nó é 'central' se a soma de suas distâncias para todos os
+    outros nós é baixa. O score é invertido e normalizado.
+
+    Score(v) ~ 1.0 / sum(d(v, u) for all u)
+
+    Isso é um O(n^2) de pré-processamento, o que é aceitável.
+    Retorna um dict {node: score} normalizado [0, 1].
+    """
     n = inst.n()
-    k = min(k, max(1, n - 1))
-    avgs = []
-    for i in range(n):
-        ds = [inst.dist(i, j) for j in range(n) if j != i]
-        ds.sort()
-        avg = sum(ds[:k]) / k
-        avgs.append(avg)
-    mx = max(avgs); mn = min(avgs)
-    if mx == mn:
-        return [0.5] * n  # todos iguais
-    return [(mx - a) / (mx - mn) for a in avgs]  # invertido: menor avg => maior valor
+    
+    if n <= 1:
+        return {0: 1.0}
+
+    raw_scores = {}
+
+    # 1. Calcular a soma das distâncias para cada nó
+    for v in range(n):
+        sum_dist = 0.0
+        for u in range(n):
+            if v == u: continue
+            sum_dist += inst.dist(v, u)
+        
+        # Inverte o score: distância baixa = score alto
+        if sum_dist < 1e-9: # Praticamente no mesmo lugar
+            raw_scores[v] = float('inf')
+        else:
+            raw_scores[v] = 1.0 / sum_dist
+
+    # 2. Normalizar os scores para [0, 1]
+    max_score = max(raw_scores.values())
+    
+    final_scores = {}
+    if max_score == 0: # Evita divisão por zero se todos os scores forem 0
+        return {v: 0.0 for v in range(n)}
+        
+    for v, score in raw_scores.items():
+        if score == float('inf'): # Caso de n=1 ou nó sobreposto
+             final_scores[v] = 1.0
+        else:
+            final_scores[v] = score / max_score
+            
+    return final_scores
 
 def current_congestion(parent: Sequence[int]) -> List[int]:
     # Congestionamento atual: número de filhos por nó (grau de saída na árvore).
@@ -325,7 +345,7 @@ def greedy_randomized_construction(inst: FTPInstance, root: int, alpha: float,
                                    rng: random.Random,
                                    lambda_central: float,
                                    lambda_congest: float,
-                                   centrality: Optional[Sequence[float]] = None) -> FTPSolution:
+                                   centrality: dict[int, float]) -> FTPSolution: # Alterado o tipo de 'None' para 'dict'
     # Fase de construção do GRASP:
     #   - Mantém conjunto de nós ativos.
     #   - Para cada inativo, estima melhor pai ativo e tempo de ativação (partida imediata).
@@ -342,11 +362,9 @@ def greedy_randomized_construction(inst: FTPInstance, root: int, alpha: float,
     outdeg = [0] * n
     eligible = set([root])            # ativos com outdeg < capacity
 
-    # sinais auxiliares (se usados)
-    # TODO: Arrumar isso
-    central = [0.0] * n
-    if lambda_central != 0.0:
-        central = radial_centrality(inst)
+    # --- LINHAS REMOVIDAS ---
+    # As linhas 'central = [0.0] * n' e a chamada redundante
+    # para 'closeness_centrality' foram removidas.
 
     # enquanto houver inativos
     while len(active) < n:
@@ -360,7 +378,6 @@ def greedy_randomized_construction(inst: FTPInstance, root: int, alpha: float,
                 continue
             best_p = None
             best_arrival = None
-            best_cong = 0
 
             # melhor pai = elegível que chega mais cedo
             for u in eligible:
@@ -369,9 +386,12 @@ def greedy_randomized_construction(inst: FTPInstance, root: int, alpha: float,
                     best_arrival = arr
                     best_p = u
 
+            # --- CORREÇÃO AQUI ---
             # score = chegada + λ_congest * outdeg(pai) - λ_central * centralidade[v]
             cong = outdeg[best_p]
-            score = best_arrival + (lambda_congest * cong) - (lambda_central * central[v])
+            # Usa .get() para pegar o score de centralidade; default 0.0 se não for encontrado.
+            central_score = centrality.get(v, 0.0)
+            score = best_arrival + (lambda_congest * cong) - (lambda_central * central_score)
             candidates.append((score, v, best_p, best_arrival))
 
         # RCL por alpha (fração do topo)
@@ -485,6 +505,63 @@ def local_search_reparent(inst: FTPInstance, sol: FTPSolution, root:int) -> FTPS
     # Retorna a solução localmente ótima encontrada
     return current_sol
 
+def local_search_2opt(inst: FTPInstance, sol: FTPSolution, root: int) -> FTPSolution:
+    """
+    Busca local "2-opt leve" para cadeias P -> V -> F.
+    Tenta a topologia P -> F -> V.
+    
+    Itera por todos os nós 'F' (filho), encontra seu 'V' (pai) e 'P' (avô).
+    Testa se a troca P->V->F por P->F->V melhora o makespan.
+    Usa estratégia de primeira melhora (first improvement).
+    """
+    n = inst.n()
+    current_sol = sol
+    
+    improved = True
+    while improved:
+        improved = False
+        best_T = current_sol.makespan
+
+        # Iteramos por todos os nós 'F' (os netos em potencial)
+        # (Podemos embaralhar a ordem para aleatoriedade, mas linear é bom para começar)
+        for f in range(n):
+            if f == root:
+                continue
+
+            v = current_sol.parent[f] # v é o pai de f
+            if v == -1 or v == root:
+                continue
+                
+            p = current_sol.parent[v] # p é o pai de v (avô de f)
+            if p == -1:
+                continue
+
+            # Temos uma cadeia válida: P -> V -> F
+            # Vamos testar a topologia P -> F -> V
+            
+            trial_parent = current_sol.parent[:]
+            trial_parent[f] = p  # Pai de F vira P
+            trial_parent[v] = f  # Pai de V vira F
+            
+            # Checagem de ciclo (extremamente rara, mas segura)
+            # Se P -> F -> V -> ... -> P
+            # Isso só aconteceria se P estivesse na subárvore de V, o que é impossível.
+            # Mas, se P == f, teríamos um ciclo. P != f (p é -1 ou >=0, f é >=0)
+            # A única checagem real é se p == f, o que não pode acontecer.
+            # Estamos seguros.
+
+            # Avalia o makespan da nova árvore.
+            # Esta é a parte LENTA.
+            trial_sol = recompute_times(inst, trial_parent, root)
+            
+            if trial_sol.makespan < best_T - 1e-9:
+                current_sol = trial_sol
+                best_T = trial_sol.makespan
+                improved = True
+                break # Primeira melhora, reinicia o 'while'
+        
+    return current_sol
+
 # ============================================================
 # Path Relinking
 # ============================================================
@@ -536,8 +613,9 @@ def path_relinking(inst: FTPInstance, sol_start: FTPSolution, sol_guide: FTPSolu
     return best_on_path
 
 def grasp(inst: FTPInstance, root: int, cfg: GraspConfig, stopper: StopCriterion,
-          lambda_central: float, lambda_congest: float, k_central: int,
-          use_path_relinking: bool = False): # <-- NOVO ARGUMENTO
+          lambda_central: float, lambda_congest: float, 
+          use_path_relinking: bool = False,
+          use_2opt: bool = False) -> Tuple[Optional[FTPSolution], int]:
     # Loop principal do GRASP:
     #   - (Opcional) pré-computa centralidade radial.
     #   - Itera construção + busca local.
@@ -547,7 +625,7 @@ def grasp(inst: FTPInstance, root: int, cfg: GraspConfig, stopper: StopCriterion
     # Retorna (melhor_solucao, numero_de_iteracoes).
     rng = random.Random(cfg.seed)
 
-    centrality = radial_centrality(inst, k=k_central) if lambda_central != 0.0 else None
+    centrality = closeness_centrality(inst) if lambda_central != 0.0 else {} 
 
     best: Optional[FTPSolution] = None
     iteration = 0
@@ -578,6 +656,9 @@ def grasp(inst: FTPInstance, root: int, cfg: GraspConfig, stopper: StopCriterion
                                               lambda_central, lambda_congest, centrality)
         # 2) Busca Local
         cand = local_search_reparent(inst, cand, root)
+
+        if use_2opt:
+            cand = local_search_2opt(inst, cand, root)
 
         # ============================================================
         # BLOCO NOVO: Path-Relinking (Intensificação)
@@ -654,6 +735,7 @@ def main():
     p.add_argument("--seed", type=int, default=None)
     p.add_argument("--reactive", action="store_true", default=False)
     p.add_argument("--path-relinking", action="store_true", default=False, help="Ativa path-relinking")
+    p.add_argument("--use-2opt", action="store_true", default=False, help="Ativa busca local 2-opt")
     # sinais
     p.add_argument("--lambda-central", type=float, default=0.0, help="peso da centralidade (maior => favorece centrais)")
     p.add_argument("--k-central", type=int, default=10, help="#vizinhos para centralidade radial")
@@ -664,7 +746,6 @@ def main():
     p.add_argument("--max-no-improv", type=int, default=None)
     # saídas
     p.add_argument("--outdir", type=Path, default=Path("results"))
-    p.add_argument("--save-tree", action="store_true")
     p.add_argument("--save-csv", action="store_true")
     p.add_argument("--suffix", type=str, default="", help="Sufixo para os experimentos (ex: _exp1)")
 
@@ -684,8 +765,8 @@ def main():
     best, iters = grasp(inst, root, cfg, stopper,
                         lambda_central=args.lambda_central,
                         lambda_congest=args.lambda_congest,
-                        k_central=args.k_central,
-                        use_path_relinking=args.path_relinking) # <-- PASSA O NOVO FLAG
+                        use_path_relinking=args.path_relinking,
+                        use_2opt=args.use_2opt) 
     elapsed = time.time() - t0 
 
     out_path = args.outdir / inst.name
@@ -697,7 +778,8 @@ def main():
         f"Suffix:   {args.suffix}",
         f"--- Config ---",
         f"Alpha: {cfg.alpha}   Reactive: {cfg.reactive}   Path-relinking: {args.path_relinking}",
-        f"Lambda Central: {args.lambda_central} (k={args.k_central})",
+        f"2-opt: {args.use_2opt}",
+        f"Lambda Central: {args.lambda_central}",
         f"Lambda Congest: {args.lambda_congest}",
         f"Seed: {cfg.seed}",
         f"Stop: max_iters={args.max_iters}, max_time={args.max_time}, max_no_improv={args.max_no_improv}",
@@ -706,27 +788,14 @@ def main():
         f"Best makespan:  {best.makespan:.6f}   Time(s): {elapsed:.3f}",
     ]
 
-    # report no stdout
     for line in report_lines:
         print(line)
 
-    # Use o sufixo no nome do 'report.txt'
     with open(out_path / f"report{args.suffix}.txt", "w", encoding="utf-8") as r:
         r.write("\n".join(report_lines) + "\n")
 
-    if args.save_tree:
-        # Use o sufixo no nome do '.tree'
-        tree_path = out_path / f"{inst.name}{args.suffix}.grasp.tree"
-        with open(tree_path, "w", encoding="utf-8") as w:
-            w.write(f"NAME: {inst.name}\nTYPE: TREE\nROOT: {args.root}\n")
-            w.write("PARENT_SECTION (1-based: node parent)\n")
-            for v, pv in enumerate(best.parent):
-                pb = 0 if pv == -1 else (pv + 1)
-                w.write(f"{v+1} {pb}\n")
-        print(f"Saved tree: {tree_path}")
 
     if args.save_csv:
-        # Use o sufixo no nome do '.csv'
         csv_path = out_path / f"{inst.name}{args.suffix}.grasp.csv"
         with open(csv_path, "w", newline="", encoding="utf-8") as w:
             cw = csv.writer(w)
