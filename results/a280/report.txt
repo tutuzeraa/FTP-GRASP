@@ -1,4 +1,0 @@
-Instance: a280
-Nodes:    280   Root: 1
-Iters:    1   Alpha: 0.2   Reactive: False
-Best makespan:  356.985279   Time(s): 3.109

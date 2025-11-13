@@ -1,4 +1,4 @@
 Instance: berlin52
 Nodes:    52   Root: 1
-Iters:    54   Alpha: 0.2   Reactive: False
-Best makespan:  1297.302192   Time(s): 1.011
+Iters:    35   Alpha: 0.2   Reactive: False
+Best makespan:  1297.429195   Time(s): 1.016

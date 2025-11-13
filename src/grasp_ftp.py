@@ -284,7 +284,7 @@ def closeness_centrality(inst: FTPInstance) -> dict[int, float]:
 
     raw_scores = {}
 
-    # 1. Calcular a soma das distâncias para cada nó
+    # Calcular a soma das distâncias para cada nó
     for v in range(n):
         sum_dist = 0.0
         for u in range(n):
@@ -292,16 +292,16 @@ def closeness_centrality(inst: FTPInstance) -> dict[int, float]:
             sum_dist += inst.dist(v, u)
         
         # Inverte o score: distância baixa = score alto
-        if sum_dist < 1e-9: # Praticamente no mesmo lugar
+        if sum_dist < 1e-9:
             raw_scores[v] = float('inf')
         else:
             raw_scores[v] = 1.0 / sum_dist
 
-    # 2. Normalizar os scores para [0, 1]
+    # Normaliza os scores para [0, 1]
     max_score = max(raw_scores.values())
     
     final_scores = {}
-    if max_score == 0: # Evita divisão por zero se todos os scores forem 0
+    if max_score == 0: 
         return {v: 0.0 for v in range(n)}
         
     for v, score in raw_scores.items():
@@ -729,6 +729,7 @@ def main():
     p = argparse.ArgumentParser(description="GRASP for Freeze-Tag Problem (geometric/EUC_2D)")
     p.add_argument("instance", help=".tsp (EUC_2D) or CSV (x,y)")
     p.add_argument("--root", type=int, default=1, help="1-based root index (default: 1)")
+    p.add_argument("--auto-root", action="store_true", help="Escolhe o nó mais central como raiz (ignora --root)")
     p.add_argument("--format", choices=["auto", "tsp", "csv"], default="auto")
     # GRASP
     p.add_argument("--alpha", type=float, default=0.2)
@@ -754,9 +755,15 @@ def main():
     if fmt == "auto":
         fmt = "tsp" if args.instance.lower().endswith(".tsp") else "csv"
     inst = parse_tsplib_euc2d(args.instance) if fmt == "tsp" else parse_xy_csv(args.instance)
-    root = args.root - 1  # converte para 0-based interno
-    if not (0 <= root < inst.n()):
-        raise ValueError("invalid root index")
+
+    if args.auto_root:
+        centrality = closeness_centrality(inst)
+        root = max(centrality.items(), key=lambda x: x[1])[0]
+        print(f"-> Raiz escolhida heuristicamente: Nó {root + 1} (Score: {centrality[root]:.4f})")
+    else:
+        root = args.root - 1  # converte para 0-based interno
+        if not (0 <= root < inst.n()):
+            raise ValueError("invalid root index")
 
     cfg = GraspConfig(alpha=args.alpha, seed=args.seed, reactive=args.reactive)
     stopper = build_stopper(args)
@@ -774,7 +781,7 @@ def main():
 
     report_lines = [
         f"Instance: {inst.name}",
-        f"Nodes:    {inst.n()}   Root: {args.root}",
+        f"Nodes:    {inst.n()}   Root: {root + 1}",
         f"Suffix:   {args.suffix}",
         f"--- Config ---",
         f"Alpha: {cfg.alpha}   Reactive: {cfg.reactive}   Path-relinking: {args.path_relinking}",

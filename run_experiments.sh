@@ -5,7 +5,7 @@
 set -euo pipefail
 
 # --- Configuração Base ---
-INSTANCE_FILE="instances_teste/literatura/d198.tsp" # A instância que vamos testar
+INSTANCE_FILE="instances_tsp/a280.tsp" # A instância que vamos testar
 ROOT=1
 SEED=123
 MAX_ITERS=3000
@@ -63,7 +63,7 @@ run_exp() {
 # --- Lista de Experimentos ---
 
 # Experimento 5: alpha = 0 (guloso), sem heurísticas de score
-run_exp 0.0 0.0 0 "_base_a0.0_use2opt" --use-2opt
+run_exp 0.0 0.0 0 "_base_a0.0_use2opt" --use-2opt --auto-root
 
 # Experimento 6
 run_exp 0.0 0.0 0.05 "_base_a0.05_use2opt" --use-2opt
