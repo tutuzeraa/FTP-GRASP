@@ -1,0 +1,13 @@
+Instance: lin318
+Nodes:    318   Root: 156
+Suffix:   _a0.05_2opt_pr_cong0.2
+--- Config ---
+Alpha: 0.05   Reactive: False   Path-relinking: True
+2-opt: True
+Lambda Central: 0.0
+Lambda Congest: 0.2
+Seed: 123
+Stop: max_iters=10000, max_time=1800.0, max_no_improv=400
+--- Results ---
+Iters:    206
+Best makespan:  2662.023747   Time(s): 1805.058

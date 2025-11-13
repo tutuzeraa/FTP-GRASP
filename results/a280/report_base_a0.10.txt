@@ -1,0 +1,13 @@
+Instance: a280
+Nodes:    280   Root: 150
+Suffix:   _base_a0.10
+--- Config ---
+Alpha: 0.1   Reactive: False   Path-relinking: False
+2-opt: False
+Lambda Central: 0.0
+Lambda Congest: 0.0
+Seed: 123
+Stop: max_iters=10000, max_time=1800.0, max_no_improv=400
+--- Results ---
+Iters:    406
+Best makespan:  215.746463   Time(s): 1802.484

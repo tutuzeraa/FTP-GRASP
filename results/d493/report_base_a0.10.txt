@@ -1,0 +1,13 @@
+Instance: d493
+Nodes:    493   Root: 271
+Suffix:   _base_a0.10
+--- Config ---
+Alpha: 0.1   Reactive: False   Path-relinking: False
+2-opt: False
+Lambda Central: 0.0
+Lambda Congest: 0.0
+Seed: 123
+Stop: max_iters=10000, max_time=1800.0, max_no_improv=400
+--- Results ---
+Iters:    50
+Best makespan:  3466.652961   Time(s): 2562.890

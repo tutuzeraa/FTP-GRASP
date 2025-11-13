@@ -1,0 +1,13 @@
+Instance: d198
+Nodes:    198   Root: 91
+Suffix:   _reactive_a0.00
+--- Config ---
+Alpha: 0.0   Reactive: True   Path-relinking: False
+2-opt: False
+Lambda Central: 0.0
+Lambda Congest: 0.0
+Seed: 123
+Stop: max_iters=10000, max_time=1800.0, max_no_improv=400
+--- Results ---
+Iters:    401
+Best makespan:  2548.679757   Time(s): 819.670

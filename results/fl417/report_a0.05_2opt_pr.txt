@@ -1,0 +1,13 @@
+Instance: fl417
+Nodes:    417   Root: 59
+Suffix:   _a0.05_2opt_pr
+--- Config ---
+Alpha: 0.05   Reactive: False   Path-relinking: True
+2-opt: True
+Lambda Central: 0.0
+Lambda Congest: 0.0
+Seed: 123
+Stop: max_iters=10000, max_time=1800.0, max_no_improv=400
+--- Results ---
+Iters:    4
+Best makespan:  1835.636968   Time(s): 2045.074

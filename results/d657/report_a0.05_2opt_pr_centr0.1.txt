@@ -1,0 +1,13 @@
+Instance: d657
+Nodes:    657   Root: 177
+Suffix:   _a0.05_2opt_pr_centr0.1
+--- Config ---
+Alpha: 0.05   Reactive: False   Path-relinking: True
+2-opt: True
+Lambda Central: 0.1
+Lambda Congest: 0.0
+Seed: 123
+Stop: max_iters=10000, max_time=1800.0, max_no_improv=400
+--- Results ---
+Iters:    13
+Best makespan:  2966.992432   Time(s): 2869.891

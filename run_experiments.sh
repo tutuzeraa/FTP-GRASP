@@ -1,30 +1,52 @@
 #!/usr/bin/env bash
 # ============================================================================
-# Script de varredura de parâmetros para UMA instância do FTP
+# Script de varredura de parâmetros para instâncias do FTP
 # ============================================================================
 set -euo pipefail
 
 # --- Configuração Base ---
-INSTANCE_FILE="instances_tsp/a280.tsp" # A instância que vamos testar
 ROOT=1
 SEED=123
-MAX_ITERS=3000
-MAX_TIME=10
+MAX_ITERS=10000
+MAX_TIME=$((30*60))   # 30 minutos
 NO_IMPROV=400
 
-# --- Configuração dos Relatórios ---
+DEFAULT_INSTANCES_ROOT="instances_tsp"
+MAX_PROCS=6           # número máximo de processos (cores) em paralelo
 
-INSTANCE_NAME_WITH_EXT=$(basename "$INSTANCE_FILE")
-INSTANCE_NAME="${INSTANCE_NAME_WITH_EXT%.*}" 
-RESULTS_DIR="results/$INSTANCE_NAME"
-CENTRAL_REPORT="$RESULTS_DIR/_summary_report.csv"
+# --- Monta a lista de instâncias ---
+declare -a INSTANCES
 
-mkdir -p "$RESULTS_DIR"
+if [[ $# -gt 0 ]]; then
+    ARG="$1"
+    if [[ -f "$ARG" ]]; then
+        # Usuário passou um arquivo .tsp específico
+        INSTANCES=("$ARG")
+    elif [[ -d "$ARG" ]]; then
+        # Usuário passou um diretório: procura .tsp nele
+        mapfile -t INSTANCES < <(find "$ARG" -maxdepth 2 -type f -name '*.tsp' | sort)
+    else
+        echo "Erro: argumento '$ARG' não é um arquivo .tsp nem um diretório válido."
+        exit 1
+    fi
+else
+    # Sem argumentos: usa o diretório padrão
+    mapfile -t INSTANCES < <(find "$DEFAULT_INSTANCES_ROOT" -maxdepth 2 -type f -name '*.tsp' | sort)
+fi
 
-echo "Configuracao,Makespan,Tempo_s" > "$CENTRAL_REPORT"
-echo "Relatório central será salvo em: $CENTRAL_REPORT"
+if [[ ${#INSTANCES[@]} -eq 0 ]]; then
+    echo "Nenhuma instância .tsp encontrada."
+    exit 1
+fi
 
+# --- Função para bloquear até haver slot livre (< MAX_PROCS jobs) ---
+wait_for_slot() {
+    while (( $(jobs -r -p | wc -l) >= MAX_PROCS )); do
+        sleep 1
+    done
+}
 
+# --- Função para rodar um experimento para a instância atual ---
 run_exp() {
     local lambda_c="$1"
     local lambda_k="$2"
@@ -37,7 +59,7 @@ run_exp() {
     local report_file="$RESULTS_DIR/report${suffix}.txt"
 
     echo "--- Executando Experimento: $suffix ---"
-    
+
     python3 src/grasp_ftp.py "$INSTANCE_FILE" \
         --root "$ROOT" --seed "$SEED" \
         --alpha "$alpha" \
@@ -46,116 +68,74 @@ run_exp() {
         --max-iters "$MAX_ITERS" --max-time "$MAX_TIME" --max-no-improv "$NO_IMPROV" \
         --save-csv \
         --suffix "$suffix" \
+        --auto-root \
         "${extra_args[@]}"
 
-    
     echo "--- Experimento $suffix concluído ---"
 
-    # --- PÓS-PROCESSAMENTO: Extrai dados do report individual ---
+    # Pós-processamento: extrai dados do report individual
     if [[ -f "$report_file" ]]; then
-        local data_line=$(grep "Best makespan:" "$report_file" | awk '{print $3 "," $5}')
+        local data_line
+        data_line=$(grep "Best makespan:" "$report_file" | awk '{print $3 "," $5}')
         echo "$suffix,$data_line" >> "$CENTRAL_REPORT"
     else
         echo "AVISO: $report_file não foi encontrado. Não foi possível adicionar ao sumário."
     fi
 }
 
-# --- Lista de Experimentos ---
+# --- Loop sobre todas as instâncias ---
+for INSTANCE_FILE in "${INSTANCES[@]}"; do
+    echo "================================================================="
+    echo "Agendando experimentos para instância: $INSTANCE_FILE"
 
-# Experimento 5: alpha = 0 (guloso), sem heurísticas de score
-run_exp 0.0 0.0 0 "_base_a0.0_use2opt" --use-2opt --auto-root
+    INSTANCE_NAME_WITH_EXT=$(basename "$INSTANCE_FILE")
+    INSTANCE_NAME="${INSTANCE_NAME_WITH_EXT%.*}"
+    RESULTS_DIR="results/$INSTANCE_NAME"
+    CENTRAL_REPORT="$RESULTS_DIR/_summary_report.csv"
 
-# Experimento 6
-run_exp 0.0 0.0 0.05 "_base_a0.05_use2opt" --use-2opt
-# Experimento 7: 
-run_exp 0.0 0.0 0.1 "_base_a0.1_use2opt" --use-2opt
+    mkdir -p "$RESULTS_DIR"
 
-# Experimento 8: 
-run_exp 0.0 0.0 0.15 "_base_a0.15_use2opt" --use-2opt
+    echo "Configuracao,Makespan,Tempo_s" > "$CENTRAL_REPORT"
+    echo "Relatório central será salvo em: $CENTRAL_REPORT"
 
-# Experimento 9: alpha = 1 (totalmente aleatório), sem heurísticas de score
-run_exp 0.0 0.0 1.0 "_base_a1.0_use2opt" --use-2opt
+    # -------------------------------------------------------------
+    # Lista de Experimentos para ESTA instância
+    # (todos vão para a fila global, respeitando MAX_PROCS)
+    # -------------------------------------------------------------
 
-# Experimento 5: alpha = 0 (guloso), sem heurísticas de score
-run_exp 0.0 0.0 0 "_base_a0.0" 
+    # 1) Guloso (reativo) (0 0 0) --reactive
+    wait_for_slot
+    run_exp 0.0 0.0 0.0 "_reactive_a0.00" --reactive &
 
-# Experimento 6
-run_exp 0.0 0.0 0.05 "_base_a0.05" 
+    # 2) Alfa 1 (0 0 0.05)
+    wait_for_slot
+    run_exp 0.0 0.0 0.05 "_base_a0.05" &
 
-# Experimento 7: 
-run_exp 0.0 0.0 0.1 "_base_a0.1" 
+    # 3) Alfa 2 (0 0 0.1)
+    wait_for_slot
+    run_exp 0.0 0.0 0.10 "_base_a0.10" &
 
-# Experimento 8: 
-run_exp 0.0 0.0 0.15 "_base_a0.15"
+    # 4) Busca local 2-opt (0 0 0.05) --use-2opt --path-relinking
+    wait_for_slot
+    run_exp 0.0 0.0 0.05 "_a0.05_2opt_pr" --use-2opt --path-relinking &
 
-# Experimento 9: alpha = 1 (totalmente aleatório), sem heurísticas de score
-run_exp 0.0 0.0 1.0 "_base_a1.0"
+    # 5) Com “cong” (0.1 0 0.05) --use-2opt --path-relinking
+    wait_for_slot
+    run_exp 0.1 0.0 0.05 "_a0.05_2opt_pr_centr0.1" --use-2opt --path-relinking &
 
-# Experimento 2: Apenas Congestionamento
-run_exp 0.0 0.1 0.1 "_cong_0.1"
+    # 6) Com “centralidade” (0 0.2 0.05) --use-2opt --path-relinking
+    wait_for_slot
+    run_exp 0.0 0.2 0.05 "_a0.05_2opt_pr_cong0.2" --use-2opt --path-relinking &
 
-# Experimento 2: Apenas Congestionamento
-run_exp 0.0 0.2 0.1 "_cong_0.2"
+    # 7) Com os dois (0.2 0.5 0.05) --use-2opt --path-relinking
+    wait_for_slot
+    run_exp 0.2 0.5 0.05 "_a0.05_2opt_pr_centr0.2_cong0.5" --use-2opt --path-relinking &
 
-# Experimento 2: Apenas Congestionamento
-run_exp 0.0 0.3 0.1 "_cong_0.3"
+    echo "Experimentos desta instância foram enfileirados: $INSTANCE_NAME"
+    echo "================================================================="
+done
 
-# Experimento 3: Apenas Centralidade
-run_exp 0.1 0.0 0.1 "_centr_0.1"
+# Espera TODOS os jobs (todas instâncias / todos experimentos) terminarem
+wait
 
-# Experimento 2: Apenas centralidade
-run_exp 0.2 0.0 0.1 "_centr_0.2"
-
-# Experimento 2: Apenas Centralidade
-run_exp 0.3 0.0 0.1 "_centr_0.3"
-
-# Experimento 2: Apenas Centralidade
-run_exp 0.5 0.0 0.1 "_centr_0.5"
-
-# Experimento 2: Apenas Centralidade
-run_exp 1.0 0.0 0.1 "_centr_0.5"
-
-# Experimento 4: Centralidade e congestionamento original
-run_exp 0.1 0.1 0.1 "_centr_cong_0.1"
-
-# Experimento 4: Centralidade e congestionamento original
-run_exp 0.2 0.2 0.1 "_centr_cong_0.2"
-
-# Experimento 4: Centralidade e congestionamento original
-run_exp 0.3 0.3 0.1 "_centr_cong_0.3"
-
-# Experimento 4: Centralidade e congestionamento original
-run_exp 0.2 0.5 0.1 "_centr_cong_0.2_0.5"
-
-# Experimento 4: Centralidade e congestionamento original
-run_exp 0.5 0.2 0.1 "_centr_cong_0.5_0.2"
-
-# Experimento 5: alpha = 0 (guloso), sem heurísticas de score
-run_exp 0.0 0.0 0 "_base_a0.0_reactive" --reactive
-
-# Experimento 6
-run_exp 0.0 0.0 0.05 "_base_a0.05_reactive" --reactive
-# Experimento 7: 
-run_exp 0.0 0.0 0.1 "_base_a0.1_reactive" --reactive
-
-# Experimento 8: 
-run_exp 0.0 0.0 0.15 "_base_a0.15_reactive" --reactive
-
-# Experimento 9: alpha = 1 (totalmente aleatório), sem heurísticas de score
-run_exp 0.0 0.0 1.0 "_base_a1.0_reactive" --reactive
-
-# Experimento 5: alpha = 0 (guloso), sem heurísticas de score
-run_exp 0.0 0.0 0 "_base_a0.0_pathRelinking" --path-relinking
-
-# Experimento 6
-run_exp 0.0 0.0 0.05 "_base_a0.05_pathRelinking" --path-relinking
-# Experimento 7: 
-run_exp 0.0 0.0 0.1 "_base_a0.1_pathRelinking" --path-relinking
-
-# Experimento 8: 
-run_exp 0.0 0.0 0.15 "_base_a0.15_pathRelinking" --path-relinking
-
-# Experimento 9: alpha = 1 (totalmente aleatório), sem heurísticas de score
-run_exp 0.0 0.0 1.0 "_base_a1.0_pathRelinking" --path-relinking
-
-echo "Todos os experimentos concluídos. Relatório central salvo em: $CENTRAL_REPORT"
+echo "Todos os experimentos concluídos para todas as instâncias."

@@ -1,0 +1,13 @@
+Instance: kroA150
+Nodes:    150   Root: 58
+Suffix:   _base_a0.05
+--- Config ---
+Alpha: 0.05   Reactive: False   Path-relinking: False
+2-opt: False
+Lambda Central: 0.0
+Lambda Congest: 0.0
+Seed: 123
+Stop: max_iters=10000, max_time=1800.0, max_no_improv=400
+--- Results ---
+Iters:    755
+Best makespan:  2694.050521   Time(s): 498.766
