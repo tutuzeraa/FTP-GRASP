@@ -6,6 +6,8 @@ from typing import Dict, Tuple, List
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.cm as cm  # Importado para o colormap
+import matplotlib.colors as mcolors  # Importado para o colormap
 from matplotlib.animation import FuncAnimation, PillowWriter
 
 def parse_tsplib_euc2d(path: str) -> Dict:
@@ -107,14 +109,34 @@ def animate_activation(tsp_path: str, csv_path: str, out_path: str,
     dx, dy = xmax - xmin, ymax - ymin
     ax.set_xlim(xmin - pad * dx, xmax + pad * dx)
     ax.set_ylim(ymin - pad * dy, ymax + pad * dy)
-    ax.set_title(f"{name} — Activation over time")
+    ax.set_title(f"{name} — Ativação ao longo do tempo", fontsize=12)
+    
+    # --- MELHORIA: Colormap para as arestas ---
+    # Normaliza o tempo de 0 a T_max para o colormap
+    cmap = cm.viridis
+    norm = mcolors.Normalize(vmin=0, vmax=T_max)
+    # ----------------------------------------
 
     # inactive (faint) + active scatter (no explicit colors)
-    scat_inactive = ax.scatter(xy[:, 0], xy[:, 1], s=20, alpha=0.15)
+    scat_inactive = ax.scatter(xy[:, 0], xy[:, 1], s=20, alpha=0.15, color='gray')
     scat_active   = ax.scatter([], [], s=50, alpha=1.0)
+    
+    # --- MELHORIA: Adiciona barra de cores ---
+    sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
+    sm.set_array([]) # Necessário para o colorbar funcionar
+    cbar = fig.colorbar(sm, ax=ax, orientation='vertical', pad=0.02, shrink=0.8)
+    cbar.set_label('Tempo de Ativação (Aresta)')
+    # ---------------------------------------
 
-    # one line artist per edge; initially empty
-    lines = [ax.plot([], [], linewidth=1.5, alpha=0.9)[0] for _ in edges]
+    # one line artist per edge; inicialmente empty
+    # --- MELHORIA: Aplica cor baseada no tempo de ativação ---
+    lines = []
+    for (p, v, tp, tv) in edges:
+        # Usa o tempo de chegada (tv) para definir a cor
+        color = cmap(norm(tv))
+        line = ax.plot([], [], linewidth=1.5, alpha=0.9, color=color)[0]
+        lines.append(line)
+    # -----------------------------------------------------
 
     # id labels (small)
     _ = [ax.text(xy[i, 0], xy[i, 1], f"{nid}", fontsize=6,
@@ -132,18 +154,18 @@ def animate_activation(tsp_path: str, csv_path: str, out_path: str,
         np.copyto(active_mask, times <= t_now)
         scat_active.set_offsets(xy[active_mask])
 
-        # draw each edge partially from parent at t_p to child at t_v
+        # desenha cada aresta parcialmente do pai (tp) para o filho (tv)
         for k, (p, v, tp, tv) in enumerate(edges):
             x0, y0 = xy[p]; x1, y1 = xy[v]
             if t_now <= tp:
-                lines[k].set_data([], [])
+                lines[k].set_data([], []) # Ainda não saiu
             elif tp < t_now < tv and tv > tp:
-                s = (t_now - tp) / (tv - tp)
+                s = (t_now - tp) / (tv - tp) # Em trânsito
                 xm = x0 + s * (x1 - x0); ym = y0 + s * (y1 - y0)
                 lines[k].set_data([x0, xm], [y0, ym])
             else:
                 if t_now >= tv:
-                    lines[k].set_data([x0, x1], [y0, y1])
+                    lines[k].set_data([x0, x1], [y0, y1]) # Chegou
                 else:
                     lines[k].set_data([], [])
 
@@ -152,14 +174,30 @@ def animate_activation(tsp_path: str, csv_path: str, out_path: str,
 
     anim = FuncAnimation(fig, update, frames=total_frames, interval=1000 / fps, blit=True)
     out_path = Path(out_path); out_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    print(f"Salvando animação: {out_path.as_posix()} (Pode demorar...)")
     PillowWriter(fps=fps).setup(fig, out_path.as_posix())  # ensure writer availability
     anim.save(out_path.as_posix(), writer=PillowWriter(fps=fps))
+    print("Animação salva.")
+
+    # --- NOVO: Salva a figura final (último frame) ---
+    print(f"Salvando frame final para {name}...")
+    # Define o gráfico para o estado final
+    update(total_frames - 1)
+    # Cria o caminho para o .png
+    final_png_path = out_path.with_name(out_path.stem + "_final.png").as_posix()
+    fig.savefig(final_png_path, dpi=dpi, bbox_inches='tight')
+    print(f"Frame final salvo em: {final_png_path}")
+    # -------------------------------------------------
+    
     plt.close(fig)
     return out_path.as_posix()
 
 outdir = "animations/"
 # animate_activation("instances_tsp/a280.tsp", "results/a280/a280.grasp.csv", outdir + "a280.gif")
-animate_activation("instances_tsp/berlin52.tsp", "results/berlin52/berlin52.grasp.csv", outdir + "berlin52.gif")
+# animate_activation("instances_tsp/berlin52.tsp", "results/berlin52/berlin52.grasp.csv", outdir + "berlin52.gif")
+animate_activation("instances_analytic/hypercube_embed_d4_n16.tsp", "results/hypercube_embed_d4_n16/hypercube_embed_d4_n16_reactive_a0.00.grasp.csv", outdir + "hypercube_embed_d4_n16.gif")
+animate_activation("instances_analytic/star_n16.tsp", "results/star_n16/star_n16_reactive_a0.00.grasp.csv", outdir + "star_n16.gif")
 # animate_activation("instances_analytic/star_n64.tsp", "results/star_n64/star_n64.grasp.csv", outdir + "star_n64.gif")
 # animate_activation("instances_analytic/hypercube_embed_d5_n32.tsp", "results/hypercube_embed_d5_n32/hypercube_embed_d5_n32.grasp.csv", outdir + "hypercube_embed_d5_n32.gif")
 # animate_activation("instances_analytic/debruijn_embed_k7_m2_n128.tsp", "results/debruijn_embed_k7_m2_n128/debruijn_embed_k7_m2_n128.grasp.csv", outdir + "debruijn_embed_k7_m2_n128.gif")
