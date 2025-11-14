@@ -6,9 +6,9 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
-BASE_RESULTS_DIR = "../results"
+BASE_RESULTS_DIR = "results"
 
-# Map from suffix in "Configuracao" to a nice strategy name
+# Mapear os sufixos do _summary_report para nomes bonitos
 STRATEGY_MAP = {
     "_reactive_a0.00": "Reactive (α=0.00)",
     "_base_a0.05": "Base (α=0.05)",
@@ -24,12 +24,12 @@ EXPECTED_CONFIGS = list(STRATEGY_MAP.keys())
 
 def collect_data(base_results_dir: str) -> pd.DataFrame:
     """
-    Reads every results/<instance>/_summary_report.csv and returns a long
-    dataframe with columns: Instance, Strategy, Value (makespan).
+    Lê todos results/<instancia>/_summary_report.csv e devolve um DataFrame:
+        Instance | Strategy | Value (makespan)
     """
     base = Path(base_results_dir)
     if not base.is_dir():
-        raise RuntimeError(f"Results directory '{base_results_dir}' not found.")
+        raise RuntimeError(f"Diretório '{base_results_dir}' não encontrado.")
 
     rows = []
 
@@ -39,14 +39,13 @@ def collect_data(base_results_dir: str) -> pd.DataFrame:
 
         summary_path = inst_dir / "_summary_report.csv"
         if not summary_path.is_file():
-            print(f"[WARN] No _summary_report.csv in {inst_dir}, skipping.")
+            print(f"[WARN] Sem _summary_report.csv em {inst_dir}, pulando.")
             continue
 
         instance_name = inst_dir.name
 
         with summary_path.open("r", newline="") as f:
             reader = csv.DictReader(f)
-            # We'll put the rows in a dict first for easier lookup by Configuracao
             per_config = {}
             for row in reader:
                 cfg = row.get("Configuracao")
@@ -73,88 +72,66 @@ def collect_data(base_results_dir: str) -> pd.DataFrame:
             )
 
     if not rows:
-        raise RuntimeError("No data collected from results directory.")
+        raise RuntimeError("Nenhum dado coletado em 'results/'.")
 
     return pd.DataFrame(rows)
 
 
 def build_ratios(all_df: pd.DataFrame) -> pd.DataFrame:
     """
-    From a long dataframe (Instance, Strategy, Value),
-    build a wide matrix and compute performance ratios.
+    A partir do DF longo (Instance, Strategy, Value),
+    monta matriz instancia × estrategia e calcula os rácios.
 
-    Minimization:
+    Minimização:
         best_p = min_s Value_{p,s}
         r_{p,s} = Value_{p,s} / best_p
     """
-    # Rows = instances, columns = strategies, values = makespan
+    # Linhas = instâncias, colunas = estratégias, valores = makespan
     all_data = all_df.pivot(index="Instance", columns="Strategy", values="Value")
 
-    # Best (minimum) per instance over strategies, skipping NaN
+    # Melhor valor por instância (mínimo entre estratégias)
     best_values = all_data.min(axis=1, skipna=True)
 
-    # Compute r_{p,s}
+    # r_{p,s} = value / best
     ratios = all_data.values / best_values.values[:, np.newaxis]
     ratios_df = pd.DataFrame(ratios, index=all_data.index, columns=all_data.columns)
 
     return ratios_df
 
 
-def safe_filename_from_label(label: str) -> str:
+def plot_all_strategies(ratios_df: pd.DataFrame, output_path: Path):
     """
-    Turn a pretty label into something filename-safe and short-ish.
+    Gera UM gráfico de performance profile com TODAS as estratégias.
+    Cada linha é uma estratégia, eixo x = τ, eixo y = P(r_{p,s} <= τ).
     """
-    s = label.lower()
-    replacements = {
-        "α": "a",
-        "λ": "lambda",
-        "(": "",
-        ")": "",
-        ",": "",
-        "+": "plus",
-        "=": "",
-        "  ": " ",
-    }
-    for k, v in replacements.items():
-        s = s.replace(k, v)
-    s = s.replace(" ", "_")
-    s = s.replace(".", "")
-    return s
+    # Todos os rácios finitos > 0 (todas estratégias, todas instâncias)
+    finite = ratios_df.to_numpy().flatten()
+    finite = finite[np.isfinite(finite)]
+    finite = finite[finite > 0]
 
+    if finite.size == 0:
+        raise RuntimeError("Nenhum rácio finito para plotar.")
 
-def plot_per_strategy(ratios_df: pd.DataFrame, out_dir: Path):
-    """
-    For each strategy (column in ratios_df), generate a performance profile
-    over all instances: one PNG per strategy.
-    """
-    out_dir.mkdir(parents=True, exist_ok=True)
+    plot_taus = np.unique(finite[finite >= 1.0])
+    if 1.0 not in plot_taus:
+        plot_taus = np.insert(plot_taus, 0, 1.0)
 
+    plt.figure(figsize=(10, 6))
+
+    # Para cada estratégia, calcula P(r_{p,s} <= τ)
     for strategy in ratios_df.columns:
         solver_ratios = ratios_df[strategy].dropna()
-
         if solver_ratios.empty:
-            print(f"[WARN] No data for strategy '{strategy}', skipping.")
+            print(f"[WARN] Sem dados para estratégia '{strategy}', pulando.")
             continue
-
-        # All finite ratios for THIS strategy
-        finite = solver_ratios[np.isfinite(solver_ratios)]
-        finite = finite[finite > 0]
-        if finite.empty:
-            print(f"[WARN] No finite ratios for strategy '{strategy}', skipping.")
-            continue
-
-        plot_taus = np.unique(finite[finite >= 1.0])
-        if 1.0 not in plot_taus:
-            plot_taus = np.insert(plot_taus, 0, 1.0)
 
         num_instances = len(solver_ratios)
-
         y_values = []
+
         for tau in plot_taus:
             count = (solver_ratios <= tau).sum()
             y_values.append(count / num_instances)
 
-        plt.figure(figsize=(10, 6))
         plt.plot(
             plot_taus,
             y_values,
@@ -163,30 +140,29 @@ def plot_per_strategy(ratios_df: pd.DataFrame, out_dir: Path):
             label=strategy,
         )
 
-        plt.title(f"Performance Profile - {strategy}")
-        plt.xlabel("Performance Factor (τ)")
-        plt.ylabel("Proportion of Problems  P(rₚ,s ≤ τ)")
+    plt.title("Performance Profile (Todas as Estratégias, Métrica: Makespan)")
+    plt.xlabel("Fator de Desempenho (τ)")
+    plt.ylabel("Proporção de Problemas  P(rₚ,s ≤ τ)")
 
-        plt.xlim(left=1.0)
-        plt.ylim(0, 1.05)
+    plt.xlim(left=1.0)
+    plt.ylim(0, 1.05)
 
-        plt.grid(True, which="both", linestyle="--", linewidth=0.5)
-        plt.legend(loc="lower right")
-        plt.tight_layout()
+    plt.grid(True, which="both", linestyle="--", linewidth=0.5)
+    plt.legend(loc="lower right")
+    plt.tight_layout()
 
-        safe_name = safe_filename_from_label(strategy)
-        out_path = out_dir / f"perf_profile_{safe_name}.png"
-        plt.savefig(out_path, dpi=200)
-        plt.close()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    plt.savefig(output_path, dpi=200)
+    plt.close()
 
-        print(f"[OK] Saved performance profile for '{strategy}' to: {out_path}")
+    print(f"[OK] Gráfico combinado salvo em: {output_path}")
 
 
 def main():
     all_df = collect_data(BASE_RESULTS_DIR)
     ratios_df = build_ratios(all_df)
-    out_dir = Path(BASE_RESULTS_DIR) / "per_strategy"
-    plot_per_strategy(ratios_df, out_dir)
+    out_path = Path(BASE_RESULTS_DIR) / "performance_profile_all_strategies.png"
+    plot_all_strategies(ratios_df, out_path)
 
 
 if __name__ == "__main__":
