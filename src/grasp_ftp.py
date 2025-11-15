@@ -305,7 +305,7 @@ def closeness_centrality(inst: FTPInstance) -> dict[int, float]:
         return {v: 0.0 for v in range(n)}
         
     for v, score in raw_scores.items():
-        if score == float('inf'): # Caso de n=1 ou nó sobreposto
+        if score == float('inf'):
              final_scores[v] = 1.0
         else:
             final_scores[v] = score / max_score
@@ -362,10 +362,6 @@ def greedy_randomized_construction(inst: FTPInstance, root: int, alpha: float,
     outdeg = [0] * n
     eligible = set([root])            # ativos com outdeg < capacity
 
-    # --- LINHAS REMOVIDAS ---
-    # As linhas 'central = [0.0] * n' e a chamada redundante
-    # para 'closeness_centrality' foram removidas.
-
     # enquanto houver inativos
     while len(active) < n:
         if not eligible:
@@ -386,15 +382,11 @@ def greedy_randomized_construction(inst: FTPInstance, root: int, alpha: float,
                     best_arrival = arr
                     best_p = u
 
-            # --- CORREÇÃO AQUI ---
-            # score = chegada + λ_congest * outdeg(pai) - λ_central * centralidade[v]
             cong = outdeg[best_p]
-            # Usa .get() para pegar o score de centralidade; default 0.0 se não for encontrado.
             central_score = centrality.get(v, 0.0)
             score = best_arrival + (lambda_congest * cong) - (lambda_central * central_score)
             candidates.append((score, v, best_p, best_arrival))
 
-        # RCL por alpha (fração do topo)
         candidates.sort(key=lambda x: x[0])
         if alpha <= 0.0:
             chosen = candidates[0]
@@ -415,8 +407,7 @@ def greedy_randomized_construction(inst: FTPInstance, root: int, alpha: float,
         if outdeg[u_star] >= capacity[u_star] and u_star in eligible:
             eligible.remove(u_star)
 
-        # novo nó ativado entra com capacidade 2 e outdeg 0 -> torna-se elegível
-        # (v_star nunca é a raiz aqui)
+        # novo nó ativado entra com capacidade 2 e outdeg 0 (torna-se elegível)
         if outdeg[v_star] < capacity[v_star]:
             eligible.add(v_star)
 
@@ -431,7 +422,7 @@ def local_search_reparent(inst: FTPInstance, sol: FTPSolution, root:int) -> FTPS
     #   - Ao aceitar, recomputa tempos globalmente (recompute_times) para estabilizar
     #     o estado 'sol' e recomeça a varredura.
     n = inst.n()
-    # Copiamos a solução base para esta 'passada' da busca local
+    
     current_sol = FTPSolution(parent=sol.parent[:], t=sol.t[:], root=sol.root, makespan=sol.makespan)
     
     capacity = _init_capacity(n, root)
@@ -441,10 +432,8 @@ def local_search_reparent(inst: FTPInstance, sol: FTPSolution, root:int) -> FTPS
     while improved:
         improved = False
         
-        # O makespan a ser batido nesta iteração da busca
         best_T = current_sol.makespan
 
-        # ordem: nós mais críticos primeiro (maior tempo)
         order = sorted(range(n), key=lambda v: current_sol.t[v], reverse=True)
 
         for v in order:
@@ -454,8 +443,6 @@ def local_search_reparent(inst: FTPInstance, sol: FTPSolution, root:int) -> FTPS
             old_p = current_sol.parent[v]
             
             # Subárvore de v para evitar ciclos (não podemos anexar v em um de seus filhos)
-            # Nota: reparent_and_eval JÁ faz essa checagem, mas é bom filtrar
-            # os candidatos antes para economizar chamadas.
             sub = set(subtree_nodes(current_sol.parent, v))
             
             # candidatos: ativos, com capacidade sobrando, não na subárvore de v
@@ -470,15 +457,10 @@ def local_search_reparent(inst: FTPInstance, sol: FTPSolution, root:int) -> FTPS
                 if u == old_p:
                     continue
                 
-                # =========================================================
-                # MUDANÇA PRINCIPAL: AVALIAÇÃO INCREMENTAL
-                # =========================================================
-                # Em vez de recompute_times, usamos a avaliação incremental
-                # que só recalcula a subárvore de 'v'.
-                # O 'current_sol' (baseline) não é modificado aqui.
+
                 trial_T = reparent_and_eval(inst, current_sol, v, u)
                 
-                if trial_T + 1e-12 < best_T:  # aceita melhora estrita (tolerância numérica)
+                if trial_T + 1e-12 < best_T:  
                     best_T = trial_T
                     best_move = (v, old_p, u)
                     break  # first-improvement
@@ -486,23 +468,19 @@ def local_search_reparent(inst: FTPInstance, sol: FTPSolution, root:int) -> FTPS
             if best_move is not None:
                 v_move, old_p_move, u_move = best_move
                 
-                # =========================================================
-                # APLICA O MOVIMENTO E RE-ESTABILIZA
-                # =========================================================
-                # Agora que achamos uma melhora, aplicamos o 'parent'
+                # Achada uma melhora, aplicamos o 'parent'
                 current_sol.parent[v_move] = u_move
                 
-                # E recalculamos a árvore *uma vez* para ter os t[v] corretos
+                # Recalcula a árvore *uma vez* para ter os t[v] corretos
                 # para a próxima iteração do 'while improved'.
                 current_sol = recompute_times(inst, current_sol.parent, root)
                 
-                # Atualiza outdeg (necessário recalcular pois 'sol' é novo)
+                # Atualiza outdeg 
                 outdeg = _compute_outdeg(current_sol.parent)
 
                 improved = True
-                break  # recomeça varredura a partir da nova solução 'current_sol'
+                break  
 
-    # Retorna a solução localmente ótima encontrada
     return current_sol
 
 def local_search_2opt(inst: FTPInstance, sol: FTPSolution, root: int) -> FTPSolution:
@@ -522,8 +500,6 @@ def local_search_2opt(inst: FTPInstance, sol: FTPSolution, root: int) -> FTPSolu
         improved = False
         best_T = current_sol.makespan
 
-        # Iteramos por todos os nós 'F' (os netos em potencial)
-        # (Podemos embaralhar a ordem para aleatoriedade, mas linear é bom para começar)
         for f in range(n):
             if f == root:
                 continue
@@ -538,27 +514,19 @@ def local_search_2opt(inst: FTPInstance, sol: FTPSolution, root: int) -> FTPSolu
 
             # Temos uma cadeia válida: P -> V -> F
             # Vamos testar a topologia P -> F -> V
-            
             trial_parent = current_sol.parent[:]
             trial_parent[f] = p  # Pai de F vira P
             trial_parent[v] = f  # Pai de V vira F
-            
-            # Checagem de ciclo (extremamente rara, mas segura)
-            # Se P -> F -> V -> ... -> P
-            # Isso só aconteceria se P estivesse na subárvore de V, o que é impossível.
-            # Mas, se P == f, teríamos um ciclo. P != f (p é -1 ou >=0, f é >=0)
-            # A única checagem real é se p == f, o que não pode acontecer.
-            # Estamos seguros.
+        
 
             # Avalia o makespan da nova árvore.
-            # Esta é a parte LENTA.
             trial_sol = recompute_times(inst, trial_parent, root)
             
             if trial_sol.makespan < best_T - 1e-9:
                 current_sol = trial_sol
                 best_T = trial_sol.makespan
                 improved = True
-                break # Primeira melhora, reinicia o 'while'
+                break # first-improvement
         
     return current_sol
 
@@ -574,38 +542,30 @@ def path_relinking(inst: FTPInstance, sol_start: FTPSolution, sol_guide: FTPSolu
     sol_start: Solução de partida (ex: a candidata atual).
     sol_guide: Solução guia (ex: a melhor global).
     """
-    # A melhor solução no caminho é, no mínimo, a de partida.
     best_on_path = sol_start
     
-    # Começamos com uma cópia da solução inicial para modificar
     current_parent = sol_start.parent[:]
     
-    # 1. Encontra o "delta": conjunto de nós com pais diferentes
+    # Encontra o "delta": nós com pais diferentes entre start e guide
     delta = set()
     n = inst.n()
     for v in range(n):
         if current_parent[v] != sol_guide.parent[v]:
             delta.add(v)
             
-    # 2. Caminha enquanto houver diferenças
+    # Caminha enquanto houver diferenças
     while delta:
-        # Pega um nó aleatório (ou o primeiro) para mover
-        # .pop() é determinístico e eficiente.
         v_to_move = delta.pop()
         
-        # O pai que este nó 'deveria' ter, segundo a solução guia
         target_parent = sol_guide.parent[v_to_move]
         
-        # Aplica o movimento
         current_parent[v_to_move] = target_parent
         
-        # 3. Avalia o resultado deste 1-move
-        # Usamos recompute_times para garantir um estado 100% correto
-        # (pais, tempos e makespan) para o próximo loop.
+        # Avalia o resultado deste 1-move
         intermediate_sol = recompute_times(inst, current_parent, sol_start.root)
         
-        # 4. Verifica se esta solução no meio do caminho é uma nova
-        #    melhor solução global.
+        # Verifica se esta solução no meio do caminho é uma nova
+        # melhor solução global.
         if intermediate_sol.makespan < best_on_path.makespan - 1e-9:
             best_on_path = intermediate_sol
             
@@ -660,24 +620,18 @@ def grasp(inst: FTPInstance, root: int, cfg: GraspConfig, stopper: StopCriterion
         if use_2opt:
             cand = local_search_2opt(inst, cand, root)
 
-        # ============================================================
-        # BLOCO NOVO: Path-Relinking (Intensificação)
-        # ============================================================
+        # Path Relinking (opcional)
         pr_cand = cand # A candidata padrão é o resultado da busca local
         
         # Se o PR estiver ativo E já tivermos uma 'best' para guiar
         if use_path_relinking and best is not None:
-            # Tenta encontrar uma solução no caminho entre 'cand' e 'best'
             pr_cand = path_relinking(inst, cand, best)
         
-        # A candidata final (pr_cand) agora é o melhor resultado
-        # da (Busca Local) OU do (Path Relinking)
-        # ============================================================
 
         improved = False
-        # Comparamos a *melhor* candidata (pr_cand) com a global (best)
+        # Comparamos a melhor candidata (pr_cand) com a global (best)
         if best is None or pr_cand.makespan < best.makespan - 1e-9:
-            best = pr_cand # Salva a melhor candidata encontrada
+            best = pr_cand 
             improved = True
 
         # Atualiza critérios de parada
@@ -685,14 +639,13 @@ def grasp(inst: FTPInstance, root: int, cfg: GraspConfig, stopper: StopCriterion
 
         # Atualização do reativo: melhora aumentam probabilidade dos α vencedores
         if cfg.reactive:
-            perf_window.append((alpha, cand.makespan)) # Nota: usa o 'cand' original para o score de alpha
+            perf_window.append((alpha, cand.makespan)) 
             if len(perf_window) >= cfg.reactive_tau:
                 sums = {a: [] for a in grid}
                 for a, ms in perf_window:
                     sums[a].append(ms)
                 avgs = [(sum(sums[a]) / len(sums[a])) if sums[a] else float("inf") for a in grid]
                 mx = max(avgs)
-                # transforma custo em score (inversão simples) e normaliza
                 scores = [(mx - v + 1e-9) for v in avgs]
                 total = sum(scores)
                 probs = [s / total for s in scores]

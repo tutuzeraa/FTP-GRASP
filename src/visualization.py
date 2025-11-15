@@ -6,8 +6,8 @@ from typing import Dict, Tuple, List
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-import matplotlib.cm as cm  # Importado para o colormap
-import matplotlib.colors as mcolors  # Importado para o colormap
+import matplotlib.cm as cm  
+import matplotlib.colors as mcolors 
 from matplotlib.animation import FuncAnimation, PillowWriter
 
 def parse_tsplib_euc2d(path: str) -> Dict:
@@ -111,25 +111,18 @@ def animate_activation(tsp_path: str, csv_path: str, out_path: str,
     ax.set_ylim(ymin - pad * dy, ymax + pad * dy)
     ax.set_title(f"{name} — Ativação ao longo do tempo", fontsize=12)
     
-    # --- MELHORIA: Colormap para as arestas ---
-    # Normaliza o tempo de 0 a T_max para o colormap
     cmap = cm.viridis
     norm = mcolors.Normalize(vmin=0, vmax=T_max)
     # ----------------------------------------
 
-    # inactive (faint) + active scatter (no explicit colors)
     scat_inactive = ax.scatter(xy[:, 0], xy[:, 1], s=20, alpha=0.15, color='gray')
     scat_active   = ax.scatter([], [], s=50, alpha=1.0)
-    
-    # --- MELHORIA: Adiciona barra de cores ---
+
     sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
     sm.set_array([]) # Necessário para o colorbar funcionar
     cbar = fig.colorbar(sm, ax=ax, orientation='vertical', pad=0.02, shrink=0.8)
     cbar.set_label('Tempo de Ativação (Aresta)')
-    # ---------------------------------------
-
-    # one line artist per edge; inicialmente empty
-    # --- MELHORIA: Aplica cor baseada no tempo de ativação ---
+    # --------------------------------------- ---
     lines = []
     for (p, v, tp, tv) in edges:
         # Usa o tempo de chegada (tv) para definir a cor
@@ -138,7 +131,6 @@ def animate_activation(tsp_path: str, csv_path: str, out_path: str,
         lines.append(line)
     # -----------------------------------------------------
 
-    # id labels (small)
     _ = [ax.text(xy[i, 0], xy[i, 1], f"{nid}", fontsize=6,
                  ha="center", va="center", alpha=0.6)
          for i, nid in enumerate(ids)]
@@ -180,11 +172,8 @@ def animate_activation(tsp_path: str, csv_path: str, out_path: str,
     anim.save(out_path.as_posix(), writer=PillowWriter(fps=fps))
     print("Animação salva.")
 
-    # --- NOVO: Salva a figura final (último frame) ---
     print(f"Salvando frame final para {name}...")
-    # Define o gráfico para o estado final
     update(total_frames - 1)
-    # Cria o caminho para o .png
     final_png_path = out_path.with_name(out_path.stem + "_final.png").as_posix()
     fig.savefig(final_png_path, dpi=dpi, bbox_inches='tight')
     print(f"Frame final salvo em: {final_png_path}")
@@ -194,10 +183,10 @@ def animate_activation(tsp_path: str, csv_path: str, out_path: str,
     return out_path.as_posix()
 
 outdir = "animations/"
-# animate_activation("instances_tsp/a280.tsp", "results/a280/a280.grasp.csv", outdir + "a280.gif")
-# animate_activation("instances_tsp/berlin52.tsp", "results/berlin52/berlin52.grasp.csv", outdir + "berlin52.gif")
-animate_activation("instances_analytic/hypercube_embed_d4_n16.tsp", "results/hypercube_embed_d4_n16/hypercube_embed_d4_n16_reactive_a0.00.grasp.csv", outdir + "hypercube_embed_d4_n16.gif")
-animate_activation("instances_analytic/star_n16.tsp", "results/star_n16/star_n16_reactive_a0.00.grasp.csv", outdir + "star_n16.gif")
+animate_activation("instances_tsp/lin318.tsp", "results/lin318/lin318_a0.05_2opt_pr_cong0.2.grasp.csv", outdir + "lin318.gif")
+animate_activation("instances_tsp/kroA100.tsp", "results/kroA100/kroA100_a0.05_2opt_pr_cong0.2.grasp.csv", outdir + "kroA100.gif")
+# animate_activation("instances_analytic/hypercube_embed_d4_n16.tsp", "results/hypercube_embed_d4_n16/hypercube_embed_d4_n16_reactive_a0.00.grasp.csv", outdir + "hypercube_embed_d4_n16.gif")
+# animate_activation("instances_analytic/star_n16.tsp", "results/star_n16/star_n16_reactive_a0.00.grasp.csv", outdir + "star_n16.gif")
 # animate_activation("instances_analytic/star_n64.tsp", "results/star_n64/star_n64.grasp.csv", outdir + "star_n64.gif")
 # animate_activation("instances_analytic/hypercube_embed_d5_n32.tsp", "results/hypercube_embed_d5_n32/hypercube_embed_d5_n32.grasp.csv", outdir + "hypercube_embed_d5_n32.gif")
 # animate_activation("instances_analytic/debruijn_embed_k7_m2_n128.tsp", "results/debruijn_embed_k7_m2_n128/debruijn_embed_k7_m2_n128.grasp.csv", outdir + "debruijn_embed_k7_m2_n128.gif")
