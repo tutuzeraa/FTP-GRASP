@@ -3,11 +3,12 @@ import csv
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
 
-BASE_RESULTS_DIR = "../results"
+BASE_RESULTS_DIR = "results"
 
-# Map from suffix in "Configuracao" to pretty strategy names
+# Mapear os sufixos do _summary_report para nomes bonitos
 STRATEGY_MAP = {
     "_reactive_a0.00": "Reactive (α=0.00)",
     "_base_a0.05": "Base (α=0.05)",
@@ -21,85 +22,127 @@ STRATEGY_MAP = {
 EXPECTED_CONFIGS = list(STRATEGY_MAP.keys())
 
 
-def read_summary_file(summary_path: Path):
+def collect_data(base_results_dir: str) -> pd.DataFrame:
     """
-    Reads _summary_report.csv and returns a dict:
-        {config_suffix: makespan}
-    Only keeps rows whose 'Configuracao' is in EXPECTED_CONFIGS.
+    Lê todos results/<instancia>/_summary_report.csv e devolve um DataFrame:
+        Instance | Strategy | Value (makespan)
     """
-    makespans = {}
-    with summary_path.open("r", newline="") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            config = row.get("Configuracao")
-            if config not in EXPECTED_CONFIGS:
-                continue
-            try:
-                mk = float(row.get("Makespan"))
-            except (TypeError, ValueError):
-                continue
-            makespans[config] = mk
-    return makespans
+    base = Path(base_results_dir)
+    if not base.is_dir():
+        raise RuntimeError(f"Diretório '{base_results_dir}' não encontrado.")
+
+    rows = []
+
+    for inst_dir in sorted(base.iterdir()):
+        if not inst_dir.is_dir():
+            continue
+
+        summary_path = inst_dir / "_summary_report.csv"
+        if not summary_path.is_file():
+            print(f"[WARN] Sem _summary_report.csv em {inst_dir}, pulando.")
+            continue
+
+        instance_name = inst_dir.name
+
+        with summary_path.open("r", newline="") as f:
+            reader = csv.DictReader(f)
+            per_config = {}
+            for row in reader:
+                cfg = row.get("Configuracao")
+                if cfg is None:
+                    continue
+                per_config[cfg] = row
+
+        for cfg_suffix, label in STRATEGY_MAP.items():
+            row = per_config.get(cfg_suffix)
+            if row is None:
+                value = np.nan
+            else:
+                try:
+                    value = float(row.get("Makespan"))
+                except (TypeError, ValueError):
+                    value = np.nan
+
+            rows.append(
+                {
+                    "Instance": instance_name,
+                    "Strategy": label,
+                    "Value": value,
+                }
+            )
+
+    if not rows:
+        raise RuntimeError("Nenhum dado coletado em 'results/'.")
+
+    return pd.DataFrame(rows)
 
 
-def plot_performance_profile_instance(instance_dir: Path):
-    summary_path = instance_dir / "_summary_report.csv"
-    if not summary_path.is_file():
-        print(f"[WARN] No _summary_report.csv in {instance_dir}, skipping.")
-        return
+def build_ratios(all_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    A partir do DF longo (Instance, Strategy, Value),
+    monta matriz instancia × estrategia e calcula os rácios.
 
-    instance_name = instance_dir.name
-    print(f"[INFO] Building performance profile for instance: {instance_name}")
+    Minimização:
+        best_p = min_s Value_{p,s}
+        r_{p,s} = Value_{p,s} / best_p
+    """
+    # Linhas = instâncias, colunas = estratégias, valores = makespan
+    all_data = all_df.pivot(index="Instance", columns="Strategy", values="Value")
 
-    makespans = read_summary_file(summary_path)
-    if not makespans:
-        print(f"[WARN] No known strategies found in {summary_path}, skipping.")
-        return
+    # Melhor valor por instância (mínimo entre estratégias)
+    best_values = all_data.min(axis=1, skipna=True)
 
-    # For this single instance, best strategy is the one with MIN makespan
-    best_makespan = min(makespans.values())
+    # r_{p,s} = value / best
+    ratios = all_data.values / best_values.values[:, np.newaxis]
+    ratios_df = pd.DataFrame(ratios, index=all_data.index, columns=all_data.columns)
 
-    # r_s = makespan_s / best_makespan
-    ratios = {}
-    for config, mk in makespans.items():
-        ratios[config] = mk / best_makespan
+    return ratios_df
 
-    # Build τ values from ratios of this instance
-    finite_ratios = np.array(list(ratios.values()), dtype=float)
-    finite_ratios = finite_ratios[np.isfinite(finite_ratios)]
-    finite_ratios = finite_ratios[finite_ratios > 0]
 
-    plot_taus = np.unique(finite_ratios[finite_ratios >= 1.0])
+def plot_all_strategies(ratios_df: pd.DataFrame, output_path: Path):
+    """
+    Gera UM gráfico de performance profile com TODAS as estratégias.
+    Cada linha é uma estratégia, eixo x = τ, eixo y = P(r_{p,s} <= τ).
+    """
+    # Todos os rácios finitos > 0 (todas estratégias, todas instâncias)
+    finite = ratios_df.to_numpy().flatten()
+    finite = finite[np.isfinite(finite)]
+    finite = finite[finite > 0]
+
+    if finite.size == 0:
+        raise RuntimeError("Nenhum rácio finito para plotar.")
+
+    plot_taus = np.unique(finite[finite >= 1.0])
     if 1.0 not in plot_taus:
         plot_taus = np.insert(plot_taus, 0, 1.0)
 
-    # With 1 instance: P(r_s <= τ) is 0 or 1
-    num_instances = 1
-
     plt.figure(figsize=(10, 6))
 
-    for config in EXPECTED_CONFIGS:
-        if config not in ratios:
-            continue  # this strategy missing for this instance
+    # Para cada estratégia, calcula P(r_{p,s} <= τ)
+    for strategy in ratios_df.columns:
+        solver_ratios = ratios_df[strategy].dropna()
+        if solver_ratios.empty:
+            print(f"[WARN] Sem dados para estratégia '{strategy}', pulando.")
+            continue
 
-        ratio = ratios[config]
+        num_instances = len(solver_ratios)
         y_values = []
-        for tau in plot_taus:
-            count = 1 if ratio <= tau else 0
-            y_values.append(count / num_instances)  # i.e., 0 or 1
 
-        label = STRATEGY_MAP.get(config, config)
+        for tau in plot_taus:
+            count = (solver_ratios <= tau).sum()
+            y_values.append(count / num_instances)
+
         plt.plot(
             plot_taus,
             y_values,
             drawstyle="steps-post",
             linewidth=2,
-            label=label,
+            label=strategy,
         )
 
-    plt.title(f"Performance Profile - {instance_name} (Makespan)")
-    plt.xlabel("Performance Factor (τ)")
-    plt.ylabel("Proportion of Problems  P(rₚ,s ≤ τ)")
+    plt.title("Performance Profile (Todas as Estratégias, Métrica: Makespan)")
+    plt.xlabel("Fator de Desempenho (τ)")
+    plt.ylabel("Proporção de Problemas  P(rₚ,s ≤ τ)")
 
     plt.xlim(left=1.0)
     plt.ylim(0, 1.05)
@@ -108,22 +151,18 @@ def plot_performance_profile_instance(instance_dir: Path):
     plt.legend(loc="lower right")
     plt.tight_layout()
 
-    out_path = instance_dir / f"performance_profile_{instance_name}.png"
-    plt.savefig(out_path, dpi=200)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    plt.savefig(output_path, dpi=200)
     plt.close()
 
-    print(f"[OK] Saved: {out_path}")
+    print(f"[OK] Gráfico combinado salvo em: {output_path}")
 
 
 def main():
-    base = Path(BASE_RESULTS_DIR)
-    if not base.is_dir():
-        print(f"[ERROR] Results directory '{BASE_RESULTS_DIR}' not found.")
-        return
-
-    for child in sorted(base.iterdir()):
-        if child.is_dir():
-            plot_performance_profile_instance(child)
+    all_df = collect_data(BASE_RESULTS_DIR)
+    ratios_df = build_ratios(all_df)
+    out_path = Path(BASE_RESULTS_DIR) / "performance_profile_all_strategies.png"
+    plot_all_strategies(ratios_df, out_path)
 
 
 if __name__ == "__main__":
