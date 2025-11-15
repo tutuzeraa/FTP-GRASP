@@ -402,7 +402,6 @@ def greedy_randomized_construction(inst: FTPInstance, root: int, alpha: float,
         t[v_star] = arrival
         active.add(v_star)
 
-        # atualiza outdeg/capacidade/eligibilidade
         outdeg[u_star] += 1
         if outdeg[u_star] >= capacity[u_star] and u_star in eligible:
             eligible.remove(u_star)
@@ -468,14 +467,10 @@ def local_search_reparent(inst: FTPInstance, sol: FTPSolution, root:int) -> FTPS
             if best_move is not None:
                 v_move, old_p_move, u_move = best_move
                 
-                # Achada uma melhora, aplicamos o 'parent'
                 current_sol.parent[v_move] = u_move
                 
-                # Recalcula a árvore *uma vez* para ter os t[v] corretos
-                # para a próxima iteração do 'while improved'.
                 current_sol = recompute_times(inst, current_sol.parent, root)
                 
-                # Atualiza outdeg 
                 outdeg = _compute_outdeg(current_sol.parent)
 
                 improved = True
